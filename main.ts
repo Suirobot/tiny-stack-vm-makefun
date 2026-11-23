@@ -3,10 +3,12 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// [immediate bytes, pops, pushes] per opcode byte; -1 marks an unknown opcode.
-const META: number[][] = [];
-for (let i = 0; i < 256; i++) META.push([-1, 0, 0]);
-const def = (b: number, imm: number, pops: number, pushes: number) => { META[b] = [imm, pops, pushes]; };
+// Immediate bytes, pops and pushes per opcode byte, as three flat tables (faster than a table of
+// arrays in the hot loop); an immediate of -1 marks an unknown opcode.
+const IMM = new Int8Array(256).fill(-1);
+const POPS = new Int8Array(256);
+const PUSHES = new Int8Array(256);
+const def = (b: number, imm: number, pops: number, pushes: number) => { IMM[b] = imm; POPS[b] = pops; PUSHES[b] = pushes; };
 def(0x00, 0, 0, 0); def(0x01, 1, 0, 1); def(0x02, 4, 0, 1); def(0x03, 0, 1, 0); def(0x04, 0, 1, 2);
 def(0x05, 0, 2, 2); def(0x06, 0, 2, 3); def(0x07, 0, 3, 3);
 def(0x10, 0, 2, 1); def(0x11, 0, 2, 1); def(0x12, 0, 2, 1); def(0x13, 0, 2, 1); def(0x14, 0, 2, 1);
@@ -36,14 +38,13 @@ function run(prog: Uint8Array, input: Uint8Array): { out: Uint8Array; exit: numb
     if (steps === 1000000) return done(10);
     if (pc < 0 || pc >= n) return done(9);
     const op = prog[pc];
-    const meta = META[op];
-    if (meta[0] < 0) return done(5);
-    const imm = meta[0];
+    const imm = IMM[op];
+    if (imm < 0) return done(5);
     if (pc + imm >= n) return done(9);
     steps++;
     const next = pc + 1 + imm;
-    if (sp < meta[1]) return done(2);
-    if (sp - meta[1] + meta[2] > 256) return done(3);
+    if (sp < POPS[op]) return done(2);
+    if (sp - POPS[op] + PUSHES[op] > 256) return done(3);
     pc = next;
     switch (op) {
       case 0x00: return done(0);
